@@ -1,41 +1,38 @@
 # SceneScout
 
-> A **local, private, on-device** (Windows + NVIDIA) scanner that mines a personal video library to find candidate "scene" ranges, using NudeNet plus an optional whole-frame NSFW classifier, with manual review and `.txt` export.
+> **Local. Private. On-device (Windows + NVIDIA).** A scanner that mines a personal video library to find candidate "scene" ranges, using NudeNet plus an optional whole-frame NSFW classifier, with manual review and `.txt` export.
 
 ---
 
 ## ✨ Features
 
-- **ماسحة تلقائية (Scan)** — استخراج إطارات بفاصل 1s (قابل للتغيير)، pass1 + pass2 "refine" عند 0.5s حول الضربات.
-- **كشف مزدوج**:
-  - **NudeNet** (`320n`, `640n`, …) — كشف أجزاء محددة (genitalia, breasts, …) بعتبات score/حجم box.
-  - ** whole-frame classifier** (اختياري): `TostAI/nsfw-image-detection-large`, `viddexa/nsfw-detection-2-mini`, `Marqo/nsfw-image-detection-384`.
-- \*\*جمع ف candle "تجمع بفجوة" (merge_gap) و×COMPREHENSIVE? expansion (before/after)، تصفية min_hits / high_score.
-- **Tail mode scene-beban snaps** (snap to scene cuts via ffmpeg scene detect) when enabled.
-- **Manual editing** — apply edit (range + locked), add/delete/toggle candidates, add manual rows.
-- **Caching** — hashed cache keyed by path+size+mtime+interval+width+nudenet+classifier in `%LOCALAPPDATA%\SceneScout\cache`; `Re-analyze from cache` re-runs analysis without decoding.
-- **Export selected / all** → `<stem>_scenes.txt` with:
+- **Automatic scan (Scan)** — sample frames every N seconds (default 1.0s); first pass + a refine pass at 0.5s around hits.
+- **Dual detection:**
+  - **NudeNet** (`320n`, `640n`, …) — body-part detection (genitalia, breasts, …) with score and min-box-height thresholds.
+  - **Optional whole-frame classifier**: `TostAI/nsfw-image-detection-large`, `viddexa/nsfw-detection-2-mini`, `Marqo/nsfw-image-detection-384`.
+- **Clustering with `merge_gap`, `before`/`after` padding, `min_hits` / `HIGH_SCORE` filtering, optional scene-snap to cuts.**
+- **Manual editing** — apply edit (range + lock), add/delete/toggle candidates, add a manual row.
+- **Caching** — SHA-1 cache keyed by `path|size|mtime|interval|width|nudenet|classifier` in `%LOCALAPPDATA%\SceneScout\cache`; "Re-analyze from cache" re-runs analysis without decoding.
+- **Export selected / all** → `<stem>_scenes.txt`:
   ```
   # duration=123.456
   0:12.345-0:20.000
   ```
-- **Multi-video** — إضافة ملفات/مجلدات/Drugging-and-Drop (via FILES path).
-- **"Show frame"** — extracts high-res annotated frame (Pillow if available).
-- **Subtitle hints** — keyword-based SRT matching (sex,nude,etc.).
-- **"Locked" rows preserved on re-scan** (`merge_with_locked`).
+- **Multi-video** — add files/folders (paths separated by `;`).
+- **Show frame** — extracts a high-res annotated frame via FFmpeg (Pillow for boxes if available).
+- **Subtitle hints** — keyword-based SRT matching (default `sex,nude,naked,explicit`).
+- **"Locked" rows preserved on re-scan** via `merge_with_locked`.
 
 ## 📦 Prerequisites (Python 3.10+)
 
 Required:
-
 - **Python 3.10+** (tested on 3.13)
 - **FFmpeg + FFprobe** on PATH, or set env `FFMPEG` / `FFPROBE`.
 - `FreeSimpleGUI`
-- `NudeNet==3.4.2` (ships 320n.onnx)
+- `NudeNet==3.4.2` (ships `320n.onnx`)
 - `onnxruntime` (GPU build preferred: `onnxruntime-gpu`)
 
-Optional (for whole-frame classifier):
-
+Optional (for the whole-frame classifier):
 - `torch` (CUDA build recommended)
 - `torchvision`
 - `Pillow`
@@ -50,27 +47,23 @@ Pillow is also optional for annotated "Show frame" previews.
 ## 🚀 Quick start (Windows / NVIDIA)
 
 1. Clone:
-
    ```bash
-   git clone https://example.com/SceneScout.git
+   git clone https://github.com/barahaw/SceneScout.git
    cd SceneScout
    ```
 
 2. Create venv:
-
    ```bat
    python -m venv .venv
    .venv\Scripts\activate
    ```
 
 3. Install base:
-
    ```bat
    pip install FreeSimpleGUI nudenet==3.4.2 onnxruntime-gpu
    ```
 
 4. (Optional) Install classifier stack:
-
    ```bat
    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
    pip install pillow transformers moderators timm
@@ -87,21 +80,21 @@ Pillow is also optional for annotated "Show frame" previews.
 ## 🧪 How it works (data flow)
 
 ```
-videos ──► probe_duration ──► extract_chunk (ffmpeg, 1s) ──► frames
-         │                      ├── NudeNet.detect ───► detections
-         │                      └── FrameClassifier.predict ───► explicit/suggestive
+videos ──► probe_duration ──► extract_chunk (ffmpeg) ──► frames
+         │                     ├── NudeNet.detect ───► detections
+         │                     └── FrameClassifier.predict ──► explicit/suggestive
          │
          ├── scene_boundaries (optional) ──► snap
          │
          └── analyze_raw_to_candidates ──► hit_frames ──► build_candidates ──► merged candidates
-                                                          ├── filter (min_hits / HIGH_SCORE)
-                                                          ├── + subtitle hints
-                                                          └── merge_with_locked (preserve manual)
-                                  ──► GUI table ──► edit / export (.txt)
-                                  ──► save_cache ( sha1(path|size|mtime|...) )
+                                               ├── filter (min_hits / HIGH_SCORE)
+                                               ├── + subtitle hints
+                                               └── merge_with_locked (preserve manual)
+                           ──► GUI table ──► edit / export (.txt)
+                           ──► save_cache ( sha1(path|size|mtime|...) )
 ```
 
-For each chunk, extract frames at a configurable interval; run NudeNet per frame and optionally the batched classifier on CUDA; cluster hits by `merge_gap`; expand each cluster by `before`/`after` seconds; filter; merge overlapping/subtitle candidates; snap to scene cuts. Cached raw frames enable pure-CPU re-analysis with different parameters (`Re-analyze from cache`).
+Frames are sampled with a configurable interval; NudeNet runs per frame and the batched classifier runs on CUDA when available; hits are clustered by `merge_gap`; each cluster is padded by `before`/`after` seconds; candidates are filtered/merged/snapped. Cached raw frames enable pure-CPU re-analysis with different parameters ("Re-analyze from cache").
 
 ## 🗂️ Output format
 
@@ -115,19 +108,19 @@ Each exported candidate row becomes a range line with timestamps (hundredth-seco
 
 ## ⚙️ Key tunables (Review rules)
 
-| Key                 | Default   | Meaning                                |
-| ------------------- | --------- | -------------------------------------- |
-| Interval (s)        | 1.0       | Frame sampling interval                |
-| Frame width         | 960       | Rescale width (px)                     |
-| Box score threshold | 0.35      | min NudeNet detection score            |
-| Min box             | 0.08      | box height fraction of frame           |
-| Min hits            | 2         | hits per candidate cluster             |
-| Merge gap           | 12 (s)    | gap beyond which clusters stop merging |
-| Before / After      | 3 / 3 (s) | padding around a cluster               |
-| Explicit threshold  | 0.60      | explicit class score                   |
-| Suggestive          | 0.70      | suggestive class score                 |
-| Refine hits @0.5s   | on        | second pass around hits                |
-| Snap to scenes      | on        | snap boundaries to scene cuts          |
+| Key | Default | Meaning |
+|-----|---------|---------|
+| Interval (s) | 1.0 | Frame sampling interval |
+| Frame width | 960 | Rescale width (px) |
+| Box score threshold | 0.35 | min NudeNet detection score |
+| Min box | 0.08 | box height fraction of frame |
+| Min hits | 2 | hits per candidate cluster |
+| Merge gap | 12 (s) | gap beyond which clusters stop merging |
+| Before / After | 3 / 3 (s) | padding around a cluster |
+| Explicit threshold | 0.60 | explicit class score |
+| Suggestive | 0.70 | suggestive class score |
+| Refine hits @0.5s | on | second pass around hits |
+| Snap to scenes | on | snap boundaries to scene cuts |
 
 ## 💾 Cache
 
@@ -138,13 +131,13 @@ Each exported candidate row becomes a range line with timestamps (hundredth-seco
 
 ## 🧩 Architecture
 
-Single-file app (`SceneScout.py` ~2.4 kLoC). Noteworthy sections:
+Single-file app (`SceneScout.py`, ~2.4 kLoC). Noteworthy sections:
 
 - `AppState` — global runtime state.
 - Detectors: `ensure_nudenet`, `FrameClassifier` (transformers / moderators / timm).
 - Pipeline: `extract_chunk`, `hit_frames_from_raw`, `select_hit_frames`, `build_candidates_from_hits`, `analyze_raw_to_candidates`, `merge_with_locked`, `snap_ranges`.
-- GUI: `FreeSimpleGUI` (Dark base theme) with tables, sliders, threads for scan/re-analyze.
-- Cache: `cache_path / build_cache_key / load_cache / save_cache`.
+- GUI: `FreeSimpleGUI` (dark base theme) with tables, sliders, threaded scan/re-analyze workers.
+- Cache: `cache_path` / `build_cache_key` / `load_cache` / `save_cache`.
 
 ## 🔒 Privacy
 
@@ -153,21 +146,21 @@ Single-file app (`SceneScout.py` ~2.4 kLoC). Noteworthy sections:
 - Video data never leaves the machine.
 - Exported `.txt` files are written next to source videos (configurable by editing `export_one`).
 
-## 🐧 Run on other platforms
+## 🐧 Other platforms
 
 The code uses `os.startfile` only on Windows; on macOS/Linux it prefers `open`/`xdg-open`. FFmpeg detection works via `shutil.which`. CUDA-specific paths (CUDA decode, CUDAExecutionProvider) gracefully fall back to CPU. Primarily developed/tested on Windows.
 
-## 🤝 License
+## 🤝 Licenses
 
-Unspecified — see repository owner. External components have their own licenses (e.g. `CLASSIFIER_MODELS` entries document classifier licenses: CC BY-NC-SA 4.0 / Apache-2.0).
+Unspecified upstream — see repository owner. External components carry their own licenses (classifier entries document: TostAI CC BY-NC-SA 4.0; viddexa & Marqo Apache-2.0).
 
 ## 📝 Status
 
-Early/prototype: single-file script, no tests, no CI. Experimental thresholds and detection semantics subject to change.
+Early/prototype: single-file script, no tests, no CI. Experimental thresholds and detection semantics are subject to change.
 
 ## ⚠️ Notes
 
-- "Candidates" are heuristic suggestions — not ground truth. Always review in the table.
-- Large videos: first scan decodes frames; subsequent runs can use `Re-analyze from cache`.
-- Cancelling (Stop) sets a threading.Event; the worker finishes the current frame batch first.
-- Only simple `.srt` subtitle format is parsed.
+- Candidates are heuristic suggestions — not ground truth. Always review in the table.
+- Large videos: first scan decodes frames; subsequent runs can use "Re-analyze from cache".
+- Cancelling (Stop) sets a threading event; the worker finishes the current frame batch first.
+- Only a simple `.srt` subtitle format is parsed.
